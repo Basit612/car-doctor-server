@@ -10,7 +10,11 @@ const port = process.env.PORT || 5000;
 // middleware
 app.use(
   cors({
-    origin: ["http://localhost:5173"],
+    origin: [
+      "http://localhost:5173",
+      "https://my-first-projeccars-doctort.web.app",
+      "https://my-first-projeccars-doctort.firebaseapp.com"
+    ],
     credentials: true,
   })
 );
@@ -31,13 +35,13 @@ const client = new MongoClient(uri, {
 });
 
 // middlewares
-const looger = async (req, res, next) => {
-  console.log("called", req.host, req.originalUrl);
+const logger = async (req, res, next) => {
+  console.log("called", req.method, req.originalUrl);
   next();
 };
 
 const verifyToken = async (req, res, next) => {
-  const token = req.cookies?.token;
+  const token = req?.cookies?.token;
   console.log("value of token in middleware", token);
   if (!token) {
     return res.status(401).send({ message: "note authorized" });
@@ -53,33 +57,55 @@ const verifyToken = async (req, res, next) => {
   });
 };
 
+const cookeOption =  {
+  httpOnly: true,
+  sameSite: process.env.NODE_ENV === "production"? "none" : "strict",
+  secure: process.env.NODE_ENV === "production"? true: false,
+}
+
+
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
 
     const serviceCollection = client.db("CarDorter").collection("servises");
     const bookingCollection = client.db("CarDorter").collection("bookings");
 
-    app.get("/servises", looger, async (req, res) => {
+    // auth related api
+    app.post('/jwt', logger, async(req,res) =>{
+      const user = req.body;
+      console.log('user for token', user);
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {expiresIn: '1h'});
+
+
+      res.cookie('token', token,)
+      .send({success: true});
+    })
+
+    app.post('/logout', async(req,res) =>{
+      const user =req.body;
+      console.log('logging out', user);
+      res.clearCookie('token', {...cookeOption, maxAge: 0}).send({success: true})
+    });
+
+
+    // services related api
+    app.get("/servises", logger, async (req, res) => {
       const cursor = serviceCollection.find();
       const result = await cursor.toArray();
       res.send(result);
     });
 
     // auth related api
-    app.post("/jwt", looger, async (req, res) => {
+    app.post("/jwt", logger, async (req, res) => {
       const user = req.body;
       console.log(user);
       const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
         expiresIn: "1h",
       });
       res
-        .cookie("token", token, {
-          httpOnly: true,
-          secure: false,
-          // sameSite: 'none',
-        })
+        .cookie("token", token,cookeOption)
         .send({ success: true });
     });
 
@@ -96,10 +122,11 @@ async function run() {
     });
 
     // Bookings
-    app.get("/bookings", looger, verifyToken, async (req, res) => {
+    app.get("/bookings", logger, verifyToken, async (req, res) => {
       console.log(req.query.email);
+      // console.log('cook cook',req.cookies);
       console.log("form valid token", req.user);
-      if(req.query.email !== req.user.email){
+      if(req.user.email !== req.user.email){
         return res.status(403).send({message: 'forbidden access'})
       }
 
@@ -141,7 +168,7 @@ async function run() {
     });
 
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
+    // await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
